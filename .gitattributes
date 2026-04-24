@@ -1,0 +1,17 @@
+# Normaliza line endings a LF en el repo.
+# Git convierte automaticamente a CRLF en Windows al hacer checkout
+# si core.autocrlf esta activo, pero en el repo siempre quedan como LF.
+* text=auto eol=lf
+
+# Scripts de shell y dockerfiles siempre LF (si se les mete CRLF se rompen en Linux).
+*.sh       text eol=lf
+Dockerfile text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+
+# Binarios: no tocar
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.docx binary
