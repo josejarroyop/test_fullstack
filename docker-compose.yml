@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - pgdata:/var/lib/postgresql/data
+    container_name: feedback_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret_password
+      POSTGRES_DB: feedback_hub
+    ports:
+      - "5432:5432"
+    
+  server:
+    build: ./server
+    container_name: feedback_server
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./server/.env
+    environment:
+      # Estas sobrescriben los valores de .env cuando corres en docker,
+      # porque dentro de la red de compose el host de la BD es "db", no localhost.
+      DATABASE_URL: postgres://admin:secret_password@db:5432/feedback_hub
+      PORT: 3000
+    depends_on:
+      - db
+
+  client:
+    build: ./client
+    container_name: feedback_client
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+volumes:
+  pgdata:
