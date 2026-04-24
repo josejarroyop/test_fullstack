@@ -14,7 +14,7 @@ import { AppError } from './utils/AppError';
 import { asyncHandler } from './utils/asyncHandler';
 import { authenticate } from './middleware/auth.middleware';
 import { verifyToken } from './utils/jwt';
-import { parseCreateMessageDto } from './dtos/message.dto';
+import { parseCreateMessageDto, parseUpdateMessageDto } from './dtos/message.dto';
 import { parseUuidParam } from './dtos/params.dto';
 
 const app = express();
@@ -60,18 +60,18 @@ app.get('/', (_req, res) => {
 
 app.post('/auth/register', asyncHandler(async (req: Request, res: Response) => {
   const { user, token } = await AuthService.register(req.body);
-  res.status(201).json({ success: true, data: { user, token } });
+  res.status(201).json({ user, token });
 }));
 
 app.post('/auth/login', asyncHandler(async (req: Request, res: Response) => {
   const { user, token } = await AuthService.login(req.body);
-  res.json({ success: true, data: { user, token } });
+  res.json({ user, token });
 }));
 
 // ---------- Rutas protegidas ----------
 app.get('/users', authenticate, asyncHandler(async (_req: Request, res: Response) => {
   const users = await UserRepository.findAll();
-  res.json({ success: true, data: users });
+  res.json(users);
 }));
 
 app.post('/message', authenticate, asyncHandler(async (req: Request, res: Response) => {
@@ -81,13 +81,13 @@ app.post('/message', authenticate, asyncHandler(async (req: Request, res: Respon
   const created = await MessageRepository.create(userId, content);
   const msg = await MessageRepository.findById(created.id, userId);
 
-  res.status(201).json({ success: true, data: msg });
-  io.emit('message:new', msg);
+  res.status(201).json(msg);
+  io.emit('message:new', { message: msg });
 }));
 
 app.get('/message', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const result = await MessageRepository.findAll(req.user!.id);
-  res.json({ success: true, data: result });
+  res.json(result);
 }));
 
 app.get('/message/:id', authenticate, asyncHandler(async (req: Request, res: Response) => {
@@ -96,7 +96,30 @@ app.get('/message/:id', authenticate, asyncHandler(async (req: Request, res: Res
   if (!msg) {
     throw AppError.notFound('No existe ningun mensaje con ese ID');
   }
-  res.json({ success: true, data: msg });
+  res.json(msg);
+}));
+
+app.put('/message/:id', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = parseUuidParam(req.params);
+  const { content } = parseUpdateMessageDto(req.body);
+  if (!content) {
+    throw AppError.badRequest('Debes enviar content');
+  }
+
+  const existingMsg = await MessageRepository.findById(id, req.user!.id);
+  if (!existingMsg) {
+    throw AppError.notFound('No se encontro el mensaje');
+  }
+  if (existingMsg.user_id !== req.user!.id) {
+    throw AppError.forbidden('No puedes editar mensajes de otros usuarios');
+  }
+
+  await MessageRepository.update(id, content);
+  // Releemos el mensaje con JOIN + contadores para devolver el shape completo.
+  const msg = await MessageRepository.findById(id, req.user!.id);
+
+  res.json(msg);
+  io.emit('message:updated', { message: msg });
 }));
 
 app.delete('/message/:id', authenticate, asyncHandler(async (req: Request, res: Response) => {
@@ -109,8 +132,18 @@ app.delete('/message/:id', authenticate, asyncHandler(async (req: Request, res: 
     throw AppError.forbidden('No puedes eliminar mensajes de otros usuarios');
   }
   await MessageRepository.delete(id);
-  res.json({ success: true, message: 'Mensaje eliminado correctamente' });
+  res.json({ message: 'Mensaje eliminado correctamente' });
   io.emit('message:deleted', { id });
+}));
+
+// Historial publico: cualquiera autenticado puede ver como evoluciono un mensaje.
+app.get('/message/:id/history', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = parseUuidParam(req.params);
+  const history = await MessageRepository.getHistory(id);
+  if (history.length === 0) {
+    throw AppError.notFound('No hay historial para ese mensaje');
+  }
+  res.json(history);
 }));
 
 // ---------- Likes ----------
@@ -133,10 +166,7 @@ app.post('/message/:id/like', authenticate, asyncHandler(async (req: Request, re
   }
 
   const likes_count = await LikeRepository.countByMessage(messageId);
-  res.status(201).json({
-    success: true,
-    data: { message_id: messageId, likes_count, liked_by_me: true },
-  });
+  res.status(201).json({ message_id: messageId, likes_count, liked_by_me: true });
   io.emit('like:added', { message_id: messageId, user_id: userId, likes_count });
 }));
 
@@ -150,20 +180,17 @@ app.delete('/message/:id/like', authenticate, asyncHandler(async (req: Request, 
   }
 
   const likes_count = await LikeRepository.countByMessage(messageId);
-  res.json({
-    success: true,
-    data: { message_id: messageId, likes_count, liked_by_me: false },
-  });
+  res.json({ message_id: messageId, likes_count, liked_by_me: false });
   io.emit('like:removed', { message_id: messageId, user_id: userId, likes_count });
 }));
 
 // ---------- Error handler (al final, tras todas las rutas) ----------
 app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) => {
   if (err instanceof AppError) {
-    return res.status(err.statusCode).json({ success: false, error: err.message });
+    return res.status(err.statusCode).json({ message: err.message });
   }
   console.error('[Unhandled error]', err);
-  res.status(500).json({ success: false, error: 'Error interno del servidor' });
+  res.status(500).json({ message: 'Error interno del servidor' });
 });
 
 const PORT = Number(process.env.PORT) || 3000;
