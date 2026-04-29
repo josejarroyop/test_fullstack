@@ -1,0 +1,21 @@
+# Blueprint de Render para desplegar el backend (Express + Socket.IO).
+# Si prefieres no usar este blueprint, puedes crear el servicio manualmente
+# siguiendo DEPLOY.md (Opcion B). Ambos caminos llegan al mismo resultado.
+services:
+  - type: web
+    name: feedback-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20.19.0
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false  # se pega manualmente desde el dashboard de Neon
